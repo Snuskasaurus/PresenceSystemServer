@@ -220,3 +220,7 @@ Footer navigation
     Docs
     Contact
 
+*.vsidx
+*.db
+*.vsidx
+*.vsidx
