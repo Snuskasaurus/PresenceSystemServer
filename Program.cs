@@ -1,15 +1,16 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.Text;
 
 using System.Net.Sockets;
 using System.Net;
-using System.Text;
-using System.Net.Http;
-using System.Runtime.InteropServices;
-using static System.Net.Mime.MediaTypeNames;
 
+using System.Xml.Serialization;
+
+// https://www.cs.mcgill.ca/~adenau/pub/persistance.pdf
 // https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_server
+// https://www.geeksforgeeks.org/c-sharp-multithreading/
 
 namespace Wolcen
 {
@@ -21,21 +22,13 @@ namespace Wolcen
         }
     }
 
-    struct ClientConnectionHolder
+    class PersistanceManager
     {
-        public int IndexClient;
-        public TcpClient Connection;
-    }
 
-    struct ClientMessageHolder
-    {
-        public int IndexClient;
-        public string Message;
     }
 
     class Server
     {
-
         private Server() { }
         private static Server Instance;
         public static Server GetInstance()
@@ -45,6 +38,20 @@ namespace Wolcen
                 Instance = new Server();
             }
             return Instance;
+        }
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        
+        struct ClientConnectionHolder
+        {
+            public int IndexClient;
+            public TcpClient Connection;
+        }
+
+        struct ClientMessageHolder
+        {
+            public int IndexClient;
+            public string Message;
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -61,30 +68,12 @@ namespace Wolcen
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-        static int FindClientIndexFromConnection(ref TcpClient Connection)
+        void OnMessageReceived(int ClientIndex, string Message)
         {
-            foreach (ClientConnectionHolder ClientConnection in Server.Instance.ClientConnections)
-            {
-                if (ClientConnection.Connection == Connection) 
-                { 
-                    return ClientConnection.IndexClient;
-                }
-            }
-            return -1;
-        }
+            Console.WriteLine("Messagge from client{0}: {1}\n", ClientIndex, Message);
 
-        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-        static TcpClient FindClienConnectionFromIndex(int Index)
-        {
-            for (int i = 0; i < Server.Instance.ClientConnections.Count; i++)
-            {
-                if (Server.Instance.ClientConnections[i].IndexClient == Index)
-                {
-                    return Server.Instance.ClientConnections[i].Connection;
-                }
-            }
-            throw new Exception("Client not found");
+            string MessageToSend = "Roger that my commander " + MessagesReceived[0].Message;
+            SendMessageToClient(ClientIndex, MessageToSend);
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -158,12 +147,9 @@ namespace Wolcen
                         lock(Server.Instance.MessagesReceived)
                         {
                             ClientMessageHolder NewMessage;
-                            NewMessage.IndexClient = FindClientIndexFromConnection(ref tcpClient);
-                            if (NewMessage.IndexClient >= 0)
-                            {
-                                NewMessage.Message = Encoding.UTF8.GetString(decoded);
-                                Server.Instance.MessagesReceived.Add(NewMessage);
-                            }
+                            NewMessage.IndexClient = tcpClient.Client.Handle.ToInt32();
+                            NewMessage.Message = Encoding.UTF8.GetString(decoded);
+                            Server.Instance.MessagesReceived.Add(NewMessage);
                         }
                     }
                 }
@@ -251,11 +237,17 @@ namespace Wolcen
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-        public static void SendMessageToClient(NetworkStream Stream, String Message)
+        public static void SendMessageToClient(int ClientIndex, String Message)
         {
-            //const string eol = "\r\n";
-            byte[] EncodedMessage = EncodeMessageToSend(Message);
-            Stream.Write(EncodedMessage, 0, EncodedMessage.Length);
+            for (int i = 0; i < Server.Instance.ClientConnections.Count; i++)
+            {
+                if (Server.Instance.ClientConnections[i].IndexClient == ClientIndex)
+                {
+                    byte[] EncodedMessage = EncodeMessageToSend(Message);
+                    Server.Instance.ClientConnections[i].Connection.GetStream().Write(EncodedMessage, 0, EncodedMessage.Length);
+                    return;
+                }
+            }
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -277,13 +269,7 @@ namespace Wolcen
                 {
                     lock (Server.Instance.MessagesReceived)
                     {
-                        Console.WriteLine("Messagge from client{0}: {1}\n",
-                            MessagesReceived[0].IndexClient, MessagesReceived[0].Message);
-
-                        TcpClient clientConnection = FindClienConnectionFromIndex(MessagesReceived[0].IndexClient);
-                        string MessageToSend = "Roger that my commander " + MessagesReceived[0].Message;
-                        SendMessageToClient(clientConnection.GetStream(), MessageToSend);
-
+                        OnMessageReceived(Server.Instance.MessagesReceived[0].IndexClient, Server.Instance.MessagesReceived[0].Message);
                         MessagesReceived.RemoveAt(0);
                     }
                 }
