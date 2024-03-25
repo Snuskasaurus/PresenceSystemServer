@@ -1,11 +1,12 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Threading;
+
 using System.Net.Sockets;
 using System.Net;
 using System.Text;
-using System.Text.RegularExpressions;
-using System.IO;
-using static System.Net.Mime.MediaTypeNames;
-using System.ComponentModel;
+using System.Net.Http;
+using System.Runtime.InteropServices;
 
 // https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_server
 
@@ -15,14 +16,42 @@ namespace Wolcen
     {
         public static void Main()
         {
-            Server.Execute();
+            Server.GetInstance().StartWebsocketServer();
         }
+    }
+
+    struct ClientMessageHolder
+    {
+        int IndexClient;
+        string Message;
     }
 
     class Server
     {
-        static string CONFIG_IP = "127.0.0.1";
-        static int CONFIG_PORT = 6666;
+
+        private Server() { }
+        private static Server Instance;
+        public static Server GetInstance()
+        {
+            if (Instance == null)
+            {
+                Instance = new Server();
+            }
+            return Instance;
+        }
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+        public static string   CONFIG_IP = "127.0.0.1";
+        public static int      CONFIG_PORT = 6666;
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+        public TcpListener          TcpListener;
+
+        Dictionary<int, TcpClient> ClientConnections = new Dictionary<int, TcpClient>();
+        List<ClientMessageHolder> MessagesReceived;
+
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -48,33 +77,18 @@ namespace Wolcen
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-        public static void SendMessageToClient(ref NetworkStream Stream, String Message)
+        public static void ThreadTask_ReceiveClientStream(object client)
         {
-            const string eol = "\r\n"; // HTTP/1.1 defines the sequence CR LF as the end-of-line marker
-            byte[] EncodedMessage = Encoding.UTF8.GetBytes(Message + eol);
-            Stream.Write(EncodedMessage, 0, EncodedMessage.Length);
-        }
 
-        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-        public static void Execute()
-        {
-            TcpListener server = new TcpListener(IPAddress.Parse(CONFIG_IP), CONFIG_PORT);
-
-            server.Start();
-            Console.WriteLine("Server has started on {0}:{1}\n", CONFIG_IP, CONFIG_PORT);
-            Console.WriteLine("Waiting for a connection…\n");
-
-            TcpClient client = server.AcceptTcpClient();
-            Console.WriteLine("A client connected.");
-
-            NetworkStream stream = client.GetStream();
+            TcpClient tcpClient = (TcpClient)client;
             while (true)
             {
-                while (!stream.DataAvailable) ;
-                while (client.Available < 3) ;
+                NetworkStream stream = tcpClient.GetStream();
 
-                byte[] BytesReceived = new byte[client.Available];
+                while (!stream.DataAvailable) ;
+                while (tcpClient.Available < 3) ;
+
+                byte[] BytesReceived = new byte[tcpClient.Available];
                 stream.Read(BytesReceived, 0, BytesReceived.Length);
 
                 String data = Encoding.UTF8.GetString(BytesReceived);
@@ -95,18 +109,17 @@ namespace Wolcen
                     bool IsFinalFrame = (BytesReceived[0] & 0b10000000) != 0;
                     bool IsMasked = (BytesReceived[1] & 0b10000000) != 0;
                     int opcode = BytesReceived[0] & 0b00001111;
-                    ulong offset = 2;
                     ulong PayloadLenght = (ulong)(BytesReceived[1] & 0b01111111);
 
                     if (opcode == 1 && PayloadLenght > 0 && IsMasked)
                     {
                         byte[] decoded = new byte[PayloadLenght];
-                        byte[] masks = new byte[4] { BytesReceived[offset], BytesReceived[offset + 1], BytesReceived[offset + 2], BytesReceived[offset + 3] };
-                        offset += 4;
+
+                        byte[] masks = new byte[4] { BytesReceived[2], BytesReceived[3], BytesReceived[4], BytesReceived[5] };
 
                         for (ulong i = 0; i < PayloadLenght; ++i)
                         {
-                            decoded[i] = (byte)(BytesReceived[offset + i] ^ masks[i % 4]);
+                            decoded[i] = (byte)(BytesReceived[6 + i] ^ masks[i % 4]);
                         }
 
                         string text = Encoding.UTF8.GetString(decoded);
@@ -114,6 +127,43 @@ namespace Wolcen
                     }
                 }
             }
+        }
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+        public static void ThreadTask_ListenForNewClients()
+        {
+            while (Thread.CurrentThread.IsAlive)
+            {
+                TcpClient NewClient = Server.Instance.TcpListener.AcceptTcpClient();
+                Console.WriteLine("A new client connected: {0}", NewClient.Client.Handle.ToString());
+
+                Thread ReceivingThread = new Thread(new ParameterizedThreadStart(ThreadTask_ReceiveClientStream));
+                ReceivingThread.Start(NewClient);
+            }
+        }
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+        public static void SendMessageToClient(ref NetworkStream Stream, String Message)
+        {
+            const string eol = "\r\n"; // HTTP/1.1 defines the sequence CR LF as the end-of-line marker
+            byte[] EncodedMessage = Encoding.UTF8.GetBytes(Message + eol);
+            Stream.Write(EncodedMessage, 0, EncodedMessage.Length);
+        }
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+        public void StartWebsocketServer()
+        {
+            TcpListener = new TcpListener(IPAddress.Parse(CONFIG_IP), CONFIG_PORT);
+            TcpListener.Start();
+            Console.WriteLine("Server has started on {0}:{1}\n", CONFIG_IP, CONFIG_PORT);
+            Console.WriteLine("Waiting for a connection…\n");
+
+            Thread ListeningThread = new Thread(new ThreadStart(ThreadTask_ListenForNewClients));
+            ListeningThread.Start();
+
         }
     }
 }
