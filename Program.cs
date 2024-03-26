@@ -24,6 +24,68 @@ namespace Wolcen
 
     class PersistanceManager
     {
+        enum EPlayerActivity
+        {
+            DISCONNECTED,
+            IN_MENU,
+            PLAYING,
+        }
+
+        struct SPlayerData
+        {
+            public int NetworkIndex;
+            public EPlayerActivity Activity;
+            public List<String> FriendListNames;
+        }
+
+        Dictionary<String, SPlayerData> PlayerDatasDictionary;
+
+        // Client connect to server
+        //  - Server subscribe this player to all friends events
+        //  - Server send presence data of every friends to the connected client
+
+        // Client Disconnect from server
+        //  - Server disconnect and notify every friends
+        //  - Server un-subscribe
+        //  - Stop heartbeat
+
+        // Client Change his activity
+        //  - Server notify every friends
+
+        // Server send heartbeat
+        //  - Client respond to it
+        //      - if not, server disconnect and notify every friends
+
+        void Initialize()
+        {
+            SPlayerData StartingPlayerData;
+
+            StartingPlayerData.NetworkIndex = -1;
+            StartingPlayerData.Activity = EPlayerActivity.DISCONNECTED;
+            StartingPlayerData.FriendListNames = new List<string>();
+            StartingPlayerData.FriendListNames.Add("Player2");
+            PlayerDatasDictionary.Add("Player1", StartingPlayerData);
+
+
+            PlayerDatasDictionary.Add("Player1", StartingPlayerData);
+
+
+        }
+
+        void DisconnectPlayer(String PlayerName)
+        {
+
+        }
+
+        void ConnectPlayer(String PlayerName)
+        {
+
+        }
+
+        void ChangePlayerActivity(String PlayerName, EPlayerActivity PlayerActivity)
+        {
+
+        }
 
     }
 
@@ -264,12 +326,12 @@ namespace Wolcen
 
             while (true)
             {
-                
                 while (MessagesReceived.Count > 0)
                 {
                     lock (Server.Instance.MessagesReceived)
                     {
-                        OnMessageReceived(Server.Instance.MessagesReceived[0].IndexClient, Server.Instance.MessagesReceived[0].Message);
+                        OnMessageReceived(Server.Instance.MessagesReceived[0].IndexClient, 
+                                          Server.Instance.MessagesReceived[0].Message);
                         MessagesReceived.RemoveAt(0);
                     }
                 }
