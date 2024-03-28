@@ -7,10 +7,11 @@ using System.Net.Sockets;
 using System.Net;
 
 using System.Xml.Serialization;
+using System.Diagnostics;
 
-// https://www.cs.mcgill.ca/~adenau/pub/persistance.pdf
 // https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_server
 // https://www.geeksforgeeks.org/c-sharp-multithreading/
+// https://datatracker.ietf.org/doc/html/rfc6455#section-5.2
 
 namespace Wolcen
 {
@@ -91,6 +92,8 @@ namespace Wolcen
 
     class Server
     {
+        // Singleton
+        
         private Server() { }
         private static Server Instance;
         public static Server GetInstance()
@@ -108,6 +111,8 @@ namespace Wolcen
         {
             public int IndexClient;
             public TcpClient Connection;
+            public bool HasConnected;
+            public bool HasDisconnected;
         }
 
         struct ClientMessageHolder
@@ -118,19 +123,49 @@ namespace Wolcen
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-        public static string   CONFIG_IP = "127.0.0.1";
-        public static int      CONFIG_PORT = 6666;
+        // Configs variables
+
+        public static string    CONFIG_IP = "127.0.0.1";
+        public static int       CONFIG_PORT = 6666;
+        public static bool      CONFIG_ENABLE_DEEP_LOGS = false;
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
         public TcpListener          TcpListener;
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        
+        struct TMessageReceived
+        {
+            public int ThreadId;
+            public List<ClientMessageHolder> Messages;
+        };
+
+        // Multi-threaded variables
+
 
         private List<ClientConnectionHolder> ClientConnections = new List<ClientConnectionHolder>();
         private List<ClientMessageHolder> MessagesReceived = new List<ClientMessageHolder>();
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-        void OnMessageReceived(int ClientIndex, string Message)
+        // Events Methods
+
+        void OnClientConnected(int ClientIndex)
+        {
+            Console.WriteLine("Client{0} Connected\n", ClientIndex);
+        }
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+        void OnClientDisconnected(int ClientIndex)
+        {
+            Console.WriteLine("Client{0} disconnected\n", ClientIndex);
+        }
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+        void OnClientMessageReceived(int ClientIndex, string Message)
         {
             Console.WriteLine("Messagge from client{0}: {1}\n", ClientIndex, Message);
 
@@ -139,6 +174,8 @@ namespace Wolcen
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+        // Internal Methods
 
         public static void DoWebSocketHandshake(ref NetworkStream Stream, String DataReceived)
         {
@@ -178,7 +215,10 @@ namespace Wolcen
                 String data = Encoding.UTF8.GetString(BytesReceived);
                 if (new System.Text.RegularExpressions.Regex("^GET").IsMatch(data))
                 {
-                    Console.WriteLine("\nHandshake received:\n{0}", data);
+                    if (CONFIG_ENABLE_DEEP_LOGS)
+                    {
+                        Console.WriteLine("\nHandshake received:\n{0}", data);
+                    }
                     DoWebSocketHandshake(ref stream, data);
                 }
                 else
@@ -188,30 +228,56 @@ namespace Wolcen
                     {
                         BytesInText += BytesReceived[iByte] + " ";
                     }
-                    Console.WriteLine("bytes received:\n{0}", BytesInText);
+                    if (CONFIG_ENABLE_DEEP_LOGS)
+                    {
+                        Console.WriteLine("bytes received:\n{0}", BytesInText);
+                    }
 
                     bool IsFinalFrame = (BytesReceived[0] & 0b10000000) != 0;
                     bool IsMasked = (BytesReceived[1] & 0b10000000) != 0;
                     int opcode = BytesReceived[0] & 0b00001111;
                     ulong PayloadLenght = (ulong)(BytesReceived[1] & 0b01111111);
 
-                    if (opcode == 1 && PayloadLenght > 0 && IsMasked)
+                    if (PayloadLenght > 0 && IsMasked)
                     {
-                        byte[] decoded = new byte[PayloadLenght];
-
-                        byte[] masks = new byte[4] { BytesReceived[2], BytesReceived[3], BytesReceived[4], BytesReceived[5] };
-
-                        for (ulong i = 0; i < PayloadLenght; ++i)
+                        if (opcode == 1) // Text frame
                         {
-                            decoded[i] = (byte)(BytesReceived[6 + i] ^ masks[i % 4]);
+                            byte[] decoded = new byte[PayloadLenght];
+
+                            byte[] masks = new byte[4] { BytesReceived[2], BytesReceived[3], BytesReceived[4], BytesReceived[5] };
+
+                            for (ulong i = 0; i < PayloadLenght; ++i)
+                            {
+                                decoded[i] = (byte)(BytesReceived[6 + i] ^ masks[i % 4]);
+                            }
+
+                            lock (Server.Instance.MessagesReceived)
+                            {
+                                //Debug.Assert(Server.Instance.MessagesReceived.ThreadId == Thread.CurrentThread.ManagedThreadId);
+
+                                ClientMessageHolder NewMessage;
+                                NewMessage.IndexClient = tcpClient.Client.Handle.ToInt32();
+                                NewMessage.Message = Encoding.UTF8.GetString(decoded);
+                                Server.Instance.MessagesReceived.Add(NewMessage);
+                            }
                         }
-
-                        lock(Server.Instance.MessagesReceived)
+                        else if (opcode == 8) // Connection close
                         {
-                            ClientMessageHolder NewMessage;
-                            NewMessage.IndexClient = tcpClient.Client.Handle.ToInt32();
-                            NewMessage.Message = Encoding.UTF8.GetString(decoded);
-                            Server.Instance.MessagesReceived.Add(NewMessage);
+                            int IndexClientDisconnecting = tcpClient.Client.Handle.ToInt32();
+                            lock (Server.Instance.ClientConnections)
+                            {
+                                int iClientConnection = Server.Instance.ClientConnections.FindIndex(Connection => Connection.IndexClient==IndexClientDisconnecting);
+                                if (iClientConnection >= 0)
+                                {
+                                    ClientConnectionHolder CurrentClientConnection = Server.Instance.ClientConnections[iClientConnection];
+                                    CurrentClientConnection.HasDisconnected = true;
+                                    Server.Instance.ClientConnections[iClientConnection] = CurrentClientConnection;
+                                }
+                                else
+                                {
+                                    Debug.Assert(false);
+                                }
+                            }
                         }
                     }
                 }
@@ -225,12 +291,21 @@ namespace Wolcen
             while (Thread.CurrentThread.IsAlive)
             {
                 TcpClient NewClient = Server.Instance.TcpListener.AcceptTcpClient();
-                Console.WriteLine("A new client connected: {0}", NewClient.Client.Handle.ToString());
+                if(CONFIG_ENABLE_DEEP_LOGS)
+                {
+                    Console.WriteLine("A new client connected: {0}", NewClient.Client.Handle.ToString());
+                }
 
                 ClientConnectionHolder NewConnection;
                 NewConnection.IndexClient = NewClient.Client.Handle.ToInt32();
                 NewConnection.Connection = NewClient;
-                Server.Instance.ClientConnections.Add(NewConnection);
+                NewConnection.HasConnected = true;
+                NewConnection.HasDisconnected = false;
+
+                lock (Server.Instance.ClientConnections)
+                {
+                    Server.Instance.ClientConnections.Add(NewConnection);
+                }
 
                 Thread ReceivingThread = new Thread(new ParameterizedThreadStart(ThreadTask_ReceiveClientStream));
                 ReceivingThread.Start(NewClient);
@@ -316,8 +391,11 @@ namespace Wolcen
 
         public void StartWebsocketServer()
         {
+            MessagesReceived = new List<ClientMessageHolder>();
+
             TcpListener = new TcpListener(IPAddress.Parse(CONFIG_IP), CONFIG_PORT);
             TcpListener.Start();
+
             Console.WriteLine("Server has started on {0}:{1}\n", CONFIG_IP, CONFIG_PORT);
             Console.WriteLine("Waiting for a connection\n");
 
@@ -326,13 +404,37 @@ namespace Wolcen
 
             while (true)
             {
+                // Add clients waiting for connections and remove client waiting for disconnections
+                lock (Server.Instance.ClientConnections)
+                {
+                    for (int i = ClientConnections.Count - 1; i >= 0; i--)
+                    {
+                        if (ClientConnections[i].HasDisconnected == true) // Disconnections
+                        {
+                            OnClientDisconnected(ClientConnections[i].IndexClient);
+                            ClientConnections.RemoveAt(i);
+                        }
+                        else if (ClientConnections[i].HasConnected == true) // New connection
+                        {
+                            OnClientConnected(ClientConnections[i].IndexClient);
+                            ClientConnectionHolder NewConnection = ClientConnections[i];
+                            NewConnection.HasConnected = false;
+                            ClientConnections[i] = NewConnection;
+                        }
+                    }
+                }
+
+                // Read and dispatch the received messages
                 while (MessagesReceived.Count > 0)
                 {
                     lock (Server.Instance.MessagesReceived)
                     {
-                        OnMessageReceived(Server.Instance.MessagesReceived[0].IndexClient, 
+                       if (Server.Instance.MessagesReceived.Count > 0)
+                       {
+                           OnClientMessageReceived(Server.Instance.MessagesReceived[0].IndexClient,
                                           Server.Instance.MessagesReceived[0].Message);
-                        MessagesReceived.RemoveAt(0);
+                           MessagesReceived.RemoveAt(0);
+                       }
                     }
                 }
             }
