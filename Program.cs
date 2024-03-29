@@ -23,7 +23,7 @@ namespace Wolcen
         }
     }
 
-    class PersistanceManager
+    class PresenceManager
     {
         enum EPlayerActivity
         {
@@ -41,22 +41,7 @@ namespace Wolcen
 
         Dictionary<String, SPlayerData> PlayerDatasDictionary;
 
-        // Client connect to server
-        //  - Server subscribe this player to all friends events
-        //  - Server send presence data of every friends to the connected client
-
-        // Client Disconnect from server
-        //  - Server disconnect and notify every friends
-        //  - Server un-subscribe
-        //  - Stop heartbeat
-
-        // Client Change his activity
-        //  - Server notify every friends
-
-        // Server send heartbeat
-        //  - Client respond to it
-        //      - if not, server disconnect and notify every friends
-
+       
         void Initialize()
         {
             SPlayerData StartingPlayerData;
@@ -167,7 +152,7 @@ namespace Wolcen
 
         void OnClientMessageReceived(int ClientIndex, string Message)
         {
-            Console.WriteLine("Messagge from client{0}: {1}\n", ClientIndex, Message);
+            Console.WriteLine("client{0} Messaged:\n {1}\n", ClientIndex, Message);
 
             string MessageToSend = "Roger that my commander " + MessagesReceived[0].Message;
             SendMessageToClient(ClientIndex, MessageToSend);
