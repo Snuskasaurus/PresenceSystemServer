@@ -52,9 +52,15 @@ namespace Wolcen
             StartingPlayerData.FriendListNames.Add("Player2");
             PlayerDatasDictionary.Add("Player1", StartingPlayerData);
 
+            StartingPlayerData.FriendListNames = new List<string>();
+            StartingPlayerData.FriendListNames.Add("Player2");
+            StartingPlayerData.FriendListNames.Add("Player2");
+            PlayerDatasDictionary.Add("Player2", StartingPlayerData);
 
-            PlayerDatasDictionary.Add("Player1", StartingPlayerData);
-
+            StartingPlayerData.FriendListNames = new List<string>();
+            StartingPlayerData.FriendListNames.Add("Player2");
+            StartingPlayerData.FriendListNames.Add("Player2");
+            PlayerDatasDictionary.Add("Player3", StartingPlayerData);
 
         }
 
