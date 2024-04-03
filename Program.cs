@@ -2,12 +2,15 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Text;
+using System.Text.Json;
 
 using System.Net.Sockets;
 using System.Net;
 
-using System.Xml.Serialization;
 using System.Diagnostics;
+using Newtonsoft.Json;
+using System.Text.Json.Nodes;
+
 
 // https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_server
 // https://www.geeksforgeeks.org/c-sharp-multithreading/
@@ -25,7 +28,7 @@ namespace Wolcen
 
     class PresenceManager
     {
-        enum EPlayerActivity
+        enum playerActivity
         {
             DISCONNECTED,
             IN_MENU,
@@ -35,7 +38,7 @@ namespace Wolcen
         struct SPlayerData
         {
             public int NetworkIndex;
-            public EPlayerActivity Activity;
+            public playerActivity Activity;
             public List<String> FriendListNames;
         }
 
@@ -47,7 +50,7 @@ namespace Wolcen
             SPlayerData StartingPlayerData;
 
             StartingPlayerData.NetworkIndex = -1;
-            StartingPlayerData.Activity = EPlayerActivity.DISCONNECTED;
+            StartingPlayerData.Activity = playerActivity.DISCONNECTED;
             StartingPlayerData.FriendListNames = new List<string>();
             StartingPlayerData.FriendListNames.Add("Player2");
             PlayerDatasDictionary.Add("Player1", StartingPlayerData);
@@ -61,7 +64,6 @@ namespace Wolcen
             StartingPlayerData.FriendListNames.Add("Player2");
             StartingPlayerData.FriendListNames.Add("Player2");
             PlayerDatasDictionary.Add("Player3", StartingPlayerData);
-
         }
 
         void DisconnectPlayer(String PlayerName)
@@ -74,7 +76,7 @@ namespace Wolcen
 
         }
 
-        void ChangePlayerActivity(String PlayerName, EPlayerActivity PlayerActivity)
+        void ChangePlayerActivity(String PlayerName, playerActivity PlayerActivity)
         {
 
         }
@@ -106,6 +108,18 @@ namespace Wolcen
             public bool HasDisconnected;
         }
 
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+        struct TRequestObject
+        {
+            public string playerName { get; set; }
+            public string requestType { get; set; }
+            public string Content { get; set; }
+        }
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
         struct ClientMessageHolder
         {
             public int IndexClient;
@@ -125,7 +139,7 @@ namespace Wolcen
         public TcpListener          TcpListener;
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-        
+
         struct TMessageReceived
         {
             public int ThreadId;
@@ -160,8 +174,13 @@ namespace Wolcen
         {
             Console.WriteLine("client{0} Messaged:\n {1}\n", ClientIndex, Message);
 
-            string MessageToSend = "Roger that my commander " + MessagesReceived[0].Message;
-            SendMessageToClient(ClientIndex, MessageToSend);
+            TRequestObject NewRequest = JsonConvert.DeserializeObject<TRequestObject>(Message);
+            if (NewRequest.requestType == "ChangeActivity")
+            {
+                string MessageToSend = "Roger that my commander " + MessagesReceived[0].Message;
+                SendMessageToClient(ClientIndex, MessageToSend);
+            }
+
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
