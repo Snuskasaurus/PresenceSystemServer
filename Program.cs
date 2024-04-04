@@ -22,12 +22,28 @@ namespace Wolcen
     {
         public static void Main()
         {
+            PresenceManager.GetInstance().Initialize();
             Server.GetInstance().StartWebsocketServer();
         }
     }
 
     class PresenceManager
     {
+
+        // Singleton
+        private PresenceManager() { }
+        private static PresenceManager Instance;
+        public static PresenceManager GetInstance()
+        {
+            if (Instance == null)
+            {
+                Instance = new PresenceManager();
+            }
+            return Instance;
+        }
+
+        //
+
         enum playerActivity
         {
             DISCONNECTED,
@@ -42,10 +58,15 @@ namespace Wolcen
             public List<String> FriendListNames;
         }
 
-        Dictionary<String, SPlayerData> PlayerDatasDictionary;
+        struct PlayerFriendActivtyInfo
+        {
+            public string FriendName    { get; set; }
+            public string Activity      { get; set; }
+        }
 
-       
-        void Initialize()
+        Dictionary<String, SPlayerData> PlayerDatasDictionary = new Dictionary<string, SPlayerData>();
+
+        public void Initialize()
         {
             SPlayerData StartingPlayerData;
 
@@ -53,17 +74,17 @@ namespace Wolcen
             StartingPlayerData.Activity = playerActivity.DISCONNECTED;
             StartingPlayerData.FriendListNames = new List<string>();
             StartingPlayerData.FriendListNames.Add("Player2");
-            PlayerDatasDictionary.Add("Player1", StartingPlayerData);
+            Instance.PlayerDatasDictionary.Add("Player1", StartingPlayerData);
 
             StartingPlayerData.FriendListNames = new List<string>();
             StartingPlayerData.FriendListNames.Add("Player2");
             StartingPlayerData.FriendListNames.Add("Player2");
-            PlayerDatasDictionary.Add("Player2", StartingPlayerData);
+            Instance.PlayerDatasDictionary.Add("Player2", StartingPlayerData);
 
             StartingPlayerData.FriendListNames = new List<string>();
             StartingPlayerData.FriendListNames.Add("Player2");
             StartingPlayerData.FriendListNames.Add("Player2");
-            PlayerDatasDictionary.Add("Player3", StartingPlayerData);
+            Instance.PlayerDatasDictionary.Add("Player3", StartingPlayerData);
         }
 
         void DisconnectPlayer(String PlayerName)
@@ -78,9 +99,34 @@ namespace Wolcen
 
         void ChangePlayerActivity(String PlayerName, playerActivity PlayerActivity)
         {
+            if (PlayerDatasDictionary.ContainsKey(PlayerName) == false)
+            {
+                return;
+            }
+            SPlayerData PlayerDataCached = PlayerDatasDictionary[PlayerName];
 
+            PlayerDataCached.Activity = PlayerActivity;
+
+            PlayerDatasDictionary[PlayerName] = PlayerDataCached;
         }
 
+        public void GetAndSubscibePlayerFriend(String PlayerName, int ClientIndex)
+        {
+            if (PlayerDatasDictionary.ContainsKey(PlayerName) == false)
+            {
+                return;
+            }
+            SPlayerData PlayerDataCached = PlayerDatasDictionary[PlayerName];
+            
+            foreach (var FriendName in PlayerDataCached.FriendListNames)
+            {
+                PlayerFriendActivtyInfo FriendActivtyInfo = new PlayerFriendActivtyInfo();
+                FriendActivtyInfo.FriendName = FriendName;
+                FriendActivtyInfo.Activity = PlayerDatasDictionary[FriendName].Activity.ToString();
+                string jsonString = System.Text.Json.JsonSerializer.Serialize<PlayerFriendActivtyInfo>(FriendActivtyInfo);
+                Server.SendMessageToClient(ClientIndex, jsonString);
+            }
+        }
     }
 
     class Server
@@ -177,8 +223,7 @@ namespace Wolcen
             TRequestObject NewRequest = JsonConvert.DeserializeObject<TRequestObject>(Message);
             if (NewRequest.requestType == "ChangeActivity")
             {
-                string MessageToSend = "Roger that my commander " + MessagesReceived[0].Message;
-                SendMessageToClient(ClientIndex, MessageToSend);
+                PresenceManager.GetInstance().GetAndSubscibePlayerFriend(NewRequest.playerName, ClientIndex);
             }
 
         }
